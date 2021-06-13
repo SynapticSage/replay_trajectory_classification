@@ -8,12 +8,12 @@ import xarray as xr
 from replay_trajectory_classification.bins import (atleast_2d, get_centers,
                                                    get_grid, get_track_grid,
                                                    get_track_interior)
-from replay_trajectory_classification.core import (_acausal_decode,
+from replay_trajectory_classification.core_cupy import (_acausal_decode,
                                                    _causal_decode, mask,
                                                    scaled_likelihood)
 from replay_trajectory_classification.initial_conditions import \
     uniform_on_track
-from replay_trajectory_classification.misc import NumbaKDE
+from replay_trajectory_classification.misc import GpuKDE as NumbaKDE
 from replay_trajectory_classification.multiunit_likelihood import (
     estimate_multiunit_likelihood, fit_multiunit_likelihood)
 from replay_trajectory_classification.spiking_likelihood import (
@@ -44,7 +44,7 @@ class _DecoderBase(BaseEstimator):
         self.initial_conditions_type = initial_conditions_type
         self.infer_track_interior = infer_track_interior
 
-        if 2 * np.sqrt(replay_speed * movement_var) < place_bin_size:
+        if (2 * np.sqrt(replay_speed * movement_var) < place_bin_size).any():
             logger.warning('Place bin size is too small for a random walk '
                            'continuous state transition')
 
@@ -130,19 +130,24 @@ class _DecoderBase(BaseEstimator):
         n_position_dims = self.place_bin_centers_.shape[1]
         n_time = time.shape[0]
 
-        if n_position_dims > 1:
+        if n_position_dims == 2:
             dims = ['time', 'x_position', 'y_position']
             coords = dict(
                 time=time,
                 x_position=get_centers(self.edges_[0]),
                 y_position=get_centers(self.edges_[1]),
             )
-        else:
+        elif n_position_dims == 1:
             dims = ['time', 'position']
             coords = dict(
                 time=time,
                 position=get_centers(self.edges_[0]),
             )
+        else:
+            dims = ['time', *['x' + str(i) for i in range(n_position_dims)]]
+            coords = dict(time=time)
+            coords.update({f'x{i}':self.edges_[i] for i in range(n_position_dims)})
+
         new_shape = (n_time, *self.centers_shape_)
         try:
             results = xr.Dataset(
@@ -160,6 +165,22 @@ class _DecoderBase(BaseEstimator):
                 coords=coords)
 
         return results
+    
+    def modify_replay_factor(self, factor=1):
+        '''Allows one to ad-hoc change the replay factor
+        state_transition**(by)
+        
+        e.g. if one downsamples the time series to be
+        predicted in some way, and decides state_transition
+        needs to match the effect of downsampling
+        '''
+        from numpy import linalg
+        original_state_transition_unit = linalg.matrix_power(self.state_transition_, 
+                                                             -self.replay_speed+1)
+        original_state_transition_unit *= self.state_transition_
+        
+        self.state_transition_ = linalg.matrix_power(original_state_transition_unit, factor)
+        self.replay_speed = factor
 
 
 class SortedSpikesDecoder(_DecoderBase):
@@ -291,6 +312,9 @@ class SortedSpikesDecoder(_DecoderBase):
         results['likelihood'] = scaled_likelihood(
             estimate_spiking_likelihood(
                 spikes, np.asarray(self.place_fields_)))
+        
+        breakpoint()
+        import debugtools
         results['causal_posterior'] = _causal_decode(
             self.initial_conditions_, self.state_transition_,
             results['likelihood'])
@@ -343,9 +367,11 @@ class ClusterlessDecoder(_DecoderBase):
                  transition_type='random_walk',
                  initial_conditions_type='uniform_on_track',
                  infer_track_interior=True):
+
         super().__init__(place_bin_size, replay_speed, movement_var,
                          position_range, transition_type,
                          initial_conditions_type, infer_track_interior)
+
         self.model = model
         self.model_kwargs = model_kwargs
         if occupancy_model is None:
@@ -413,7 +439,7 @@ class ClusterlessDecoder(_DecoderBase):
     def predict(self, multiunits, time=None, is_compute_acausal=True):
         '''
 
-        Parameters
+        garameters
         ----------
         multiunits : array_like, shape (n_time, n_marks, n_electrodes)
         time : None or ndarray, shape (n_time,)
@@ -434,6 +460,8 @@ class ClusterlessDecoder(_DecoderBase):
                 self.joint_pdf_models_, self.ground_process_intensities_,
                 self.occupancy_, self.mean_rates_,
                 self.is_track_interior_.ravel(order='F')))
+        breakpoint()
+        import debugtools
         results['causal_posterior'] = _causal_decode(
             self.initial_conditions_, self.state_transition_,
             results['likelihood'])

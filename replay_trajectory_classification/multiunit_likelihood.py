@@ -278,6 +278,7 @@ def estimate_multiunit_likelihood(multiunits, place_bin_centers,
     log_likelihood : (n_time, n_bins)
 
     '''
+    
     if is_track_interior is None:
         is_track_interior = np.ones((place_bin_centers.shape[0],),
                                     dtype=np.bool)

@@ -5,6 +5,7 @@ import numpy as np
 from sklearn.base import BaseEstimator, DensityMixin
 from sklearn.decomposition import PCA
 from sklearn.neighbors import KernelDensity
+from numba import cuda
 
 # Figure Parameters
 MM_TO_INCHES = 1.0 / 25.4
@@ -95,3 +96,77 @@ class NumbaKDE(BaseEstimator, DensityMixin):
     def score_samples(self, X):
         return np.log(numba_kde(X, self.training_data,
                                 self.bandwidth[-X.shape[1]:]))
+
+## RYAN Testing cuda KDE codes
+
+@cuda.jit(device=True)
+def gaussian_pdf(x, mean, sigma):
+    '''Compute the value of a Gaussian probability density function at x with
+    given mean and sigma.
+
+    Parameters
+    ----------
+    x : float
+    mean : float
+    sigma : float
+
+    Returns
+    -------
+    pdf : float
+
+    '''
+    return math.exp(-0.5 * ((x - mean) / sigma)**2) / (sigma * SQRT_2PI)
+
+@cuda.jit
+def numba_kde_cuda2(eval_points, samples, bandwidths, out):
+    '''
+
+    Parameters
+    ----------
+    eval_points : ndarray, shape (n_eval, n_bandwidths)
+    samples : ndarray, shape (n_samples, n_bandwidths)
+    out : ndarray, shape (n_eval,)
+
+    '''
+    thread_id1, thread_id2 = cuda.grid(2)
+    stride1, stride2 = cuda.gridsize(2)
+
+    (n_eval, n_bandwidths), n_samples = eval_points.shape, samples.shape[0]
+
+    for eval_ind in range(thread_id1, n_eval, stride1):
+        for sample_ind in range(thread_id2, n_samples, stride2):
+            product_kernel = 1.0
+            for bandwidth_ind in range(n_bandwidths):
+                product_kernel *= (
+                    gaussian_pdf(eval_points[eval_ind, bandwidth_ind],
+                                 samples[sample_ind, bandwidth_ind],
+                                 bandwidths[bandwidth_ind])
+                    / bandwidths[bandwidth_ind])
+            product_kernel /= n_samples
+            cuda.atomic.add(out, eval_ind, product_kernel)
+
+
+class GpuKDE(BaseEstimator, DensityMixin):
+    def __init__(self, bandwidth=1.0):
+        self.bandwidth = bandwidth
+
+    def fit(self, X, y=None, sample_weight=None):
+        self.training_data = X
+        return self
+
+    def score_samples(self, testing_data):
+
+        threads_per_block = 8, 8
+        n_test, n_train = testing_data.shape[0], self.training_data.shape[0]
+        blocks_per_grid_x = np.min((
+            math.ceil(n_test / threads_per_block[0]), 65535))
+        blocks_per_grid_y = np.min((
+            math.ceil(n_train / threads_per_block[1]), 65535))
+        blocks_per_grid = blocks_per_grid_x, blocks_per_grid_y
+
+        results = np.zeros((testing_data.shape[0],), dtype='float32')
+        numba_kde_cuda2[blocks_per_grid, threads_per_block]( testing_data, 
+            self.training_data, self.bandwidth[-testing_data.shape[1]:], results)
+        results = np.log(results)
+
+        return results
