@@ -313,8 +313,6 @@ class SortedSpikesDecoder(_DecoderBase):
             estimate_spiking_likelihood(
                 spikes, np.asarray(self.place_fields_)))
         
-        breakpoint()
-        import debugtools
         results['causal_posterior'] = _causal_decode(
             self.initial_conditions_, self.state_transition_,
             results['likelihood'])
@@ -454,19 +452,20 @@ class ClusterlessDecoder(_DecoderBase):
         multiunits = np.asarray(multiunits)
 
         results = {}
+        print('Computing likelihood')
         results['likelihood'] = scaled_likelihood(
             estimate_multiunit_likelihood(
                 multiunits, self.place_bin_centers_,
                 self.joint_pdf_models_, self.ground_process_intensities_,
                 self.occupancy_, self.mean_rates_,
                 self.is_track_interior_.ravel(order='F')))
-        breakpoint()
-        import debugtools
+        print('Computing causal posterior')
         results['causal_posterior'] = _causal_decode(
             self.initial_conditions_, self.state_transition_,
             results['likelihood'])
 
         if is_compute_acausal:
+            print('Computing acausal posterior')
             results['acausal_posterior'] = (
                 _acausal_decode(results['causal_posterior'][..., np.newaxis],
                                 self.state_transition_))

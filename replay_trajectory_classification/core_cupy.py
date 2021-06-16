@@ -1,6 +1,7 @@
 import numpy as np
 import cupy as cp
 from numba import njit
+from tqdm import tqdm
 
 
 def logsumexp(a):
@@ -45,7 +46,7 @@ def _causal_decode(initial_conditions, state_transition, likelihood):
 
     del initial_conditions
 
-    for time_ind in cp.arange(1, n_time):
+    for time_ind in tqdm(cp.arange(1, n_time), desc="Causal filtering"):
         prior = state_transition.T @ posterior[time_ind - 1]
         posterior[time_ind] = normalize_to_probability(
             prior * likelihood[time_ind])
@@ -66,6 +67,7 @@ def _acausal_decode(causal_posterior, state_transition):
     acausal_posterior : ndarray, shape (n_time, n_bins, 1)
 
     '''
+    causal_posterior      = cp.array(causal_posterior)
     acausal_posterior     = cp.zeros_like(causal_posterior)
     acausal_posterior[-1] = cp.array(causal_posterior[-1])
     state_transition      = cp.array(state_transition)
@@ -73,7 +75,7 @@ def _acausal_decode(causal_posterior, state_transition):
     weights = cp.zeros((n_bins, 1))
     eta     = cp.array(np.spacing(1))
 
-    for time_ind in cp.arange(n_time - 2, -1, -1):
+    for time_ind in tqdm(cp.arange(n_time - 2, -1, -1), desc='Causal filtering'):
         acausal_prior = (
             state_transition.T @ causal_posterior[time_ind])
         log_ratio = (
@@ -87,7 +89,7 @@ def _acausal_decode(causal_posterior, state_transition):
     return acausal_posterior.get()
 
 
-@njit(nogil=True, error_model='numpy', cache=True)
+#@njit(nogil=True, error_model='numpy', cache=True)
 def _causal_classify(initial_conditions, continuous_state_transition,
                      discrete_state_transition, likelihood):
     '''Adaptive filter to iteratively calculate the posterior probability
@@ -128,7 +130,7 @@ def _causal_classify(initial_conditions, continuous_state_transition,
     return posterior
 
 
-@njit(nogil=True, error_model='numpy', cache=True)
+#@njit(nogil=True, error_model='numpy', cache=True)
 def _acausal_classify(causal_posterior, continuous_state_transition,
                       discrete_state_transition):
     '''Uses past and future information to estimate the state.
