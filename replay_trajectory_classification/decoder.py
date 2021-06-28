@@ -13,7 +13,7 @@ from replay_trajectory_classification.core_cupy import (_acausal_decode,
                                                    scaled_likelihood)
 from replay_trajectory_classification.initial_conditions import \
     uniform_on_track
-from replay_trajectory_classification.misc import GpuKDE as NumbaKDE
+from replay_trajectory_classification.misc_cuda2 import GpuKDE_cuda2 as NumbaKDE 
 from replay_trajectory_classification.multiunit_likelihood import (
     estimate_multiunit_likelihood, fit_multiunit_likelihood)
 from replay_trajectory_classification.spiking_likelihood import (
@@ -167,7 +167,8 @@ class _DecoderBase(BaseEstimator):
         return results
     
     def modify_replay_factor(self, factor=1):
-        '''Allows one to ad-hoc change the replay factor
+        '''
+        Allows one to ad-hoc change the replay factor
         state_transition**(by)
         
         e.g. if one downsamples the time series to be

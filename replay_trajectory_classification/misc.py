@@ -145,8 +145,32 @@ def numba_kde_cuda2(eval_points, samples, bandwidths, out):
             product_kernel /= n_samples
             cuda.atomic.add(out, eval_ind, product_kernel)
 
+class GpuKDE_cuda2b(BaseEstimator, DensityMixin):
+    def __init__(self, bandwidth=1.0):
+        self.bandwidth = bandwidth
 
-class GpuKDE(BaseEstimator, DensityMixin):
+    def fit(self, X, y=None, sample_weight=None):
+        self.training_data = X
+        return self
+
+    def score_samples(self, testing_data):
+
+        threads_per_block = 8, 8
+        n_test, n_train = testing_data.shape[0], self.training_data.shape[0]
+        blocks_per_grid_x = np.min((
+            math.ceil(n_test / threads_per_block[0]), 65535))
+        blocks_per_grid_y = np.min((
+            math.ceil(n_train / threads_per_block[1]), 65535))
+        blocks_per_grid = blocks_per_grid_x, blocks_per_grid_y
+
+        results = np.zeros((testing_data.shape[0],), dtype='float32')
+        numba_kde_cuda2[blocks_per_grid, threads_per_block]( testing_data, 
+            self.training_data, self.bandwidth[-testing_data.shape[1]:], results)
+        results = np.log(results)
+
+        return results
+
+class GpuKDE_cupy(BaseEstimator, DensityMixin):
     def __init__(self, bandwidth=1.0):
         self.bandwidth = bandwidth
 

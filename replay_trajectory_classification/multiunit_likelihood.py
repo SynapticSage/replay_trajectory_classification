@@ -278,6 +278,7 @@ def estimate_multiunit_likelihood(multiunits, place_bin_centers,
     log_likelihood : (n_time, n_bins)
 
     '''
+    from tqdm import tqdm
     
     if is_track_interior is None:
         is_track_interior = np.ones((place_bin_centers.shape[0],),
@@ -289,7 +290,8 @@ def estimate_multiunit_likelihood(multiunits, place_bin_centers,
 
     zipped = zip(np.moveaxis(multiunits, -1, 0), joint_pdf_models,
                  mean_rates, ground_process_intensities)
-    for multiunit, joint_model, mean_rate, ground_process_intensity in zipped:
+    for multiunit, joint_model, mean_rate, ground_process_intensity in tqdm(
+        zipped, desc="Estimating joint likelihood"):
         joint_mark_intensity = estimate_joint_mark_intensity(
             multiunit, place_bin_centers, occupancy, joint_model, mean_rate,
             is_track_interior)
